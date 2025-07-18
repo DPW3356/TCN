@@ -1,0 +1,68 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Simulation parameters
+hbar = 1.0 # Planck's constant (normalized)
+m = 1.0 # Particle mass
+dx = 0.1 # Space step
+dt = 0.01 # Time step
+x_max = 10 # Maximum position
+t_max = 2 # Maximum time
+lambda_nl = 0.5 # Nonlinear coupling constant
+gamma_m = [0.1, 0.05] # Memory kernel weights
+
+# Derived quantities
+x = np.arange(-x_max, x_max, dx)
+N = len(x)
+timesteps = int(t_max / dt)
+
+# Initial wavefunction: Gaussian
+beta = np.exp(-x**2).astype(np.complex128)
+beta /= np.linalg.norm(beta) # Normalize
+
+# Store past states for memory term
+memory_depth = len(gamma_m)
+past_betas = [np.copy(beta) for _ in range(memory_depth)]
+
+# Laplacian (finite difference second derivative)
+def laplacian(psi):
+    return np.roll(psi, -1) - 2 * psi + np.roll(psi, 1)
+
+# Main evolution loop
+results = []
+for t in range(timesteps):
+    # Memory term
+    memory_sum = np.zeros_like(beta, dtype=np.complex128)
+    inner_product_sum = 0
+    for m, gamma in enumerate(gamma_m):
+        memory_sum += gamma * past_betas[m]
+        inner_product_sum += np.vdot(past_betas[m], beta).real # Coherence term
+
+    # Schrödinger-like evolution with nonlinear and memory terms
+    lap = laplacian(beta)
+    H_linear = - (hbar**2 / (2 * m)) * lap / dx**2
+    nonlinear_term = lambda_nl * inner_product_sum * beta
+    d_beta_dt = (-1j / hbar) * (H_linear + memory_sum + nonlinear_term)
+
+    # Euler integration
+    beta += d_beta_dt * dt
+    beta /= np.linalg.norm(beta)
+
+    # Update memory buffer
+    past_betas = [np.copy(beta)] + past_betas[:-1]
+
+    # Save some steps for plotting
+    if t % int(timesteps / 5) == 0:
+        results.append(np.abs(beta)**2)
+
+# Plot probability densities at different time steps
+plt.figure(figsize=(10, 6))
+for i, prob_density in enumerate(results):
+    plt.plot(x, prob_density, label=f't = {i * t_max / 5:.2f}')
+plt.title("Probability Density Evolution")
+plt.xlabel("Position")
+plt.ylabel("Probability Density")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
