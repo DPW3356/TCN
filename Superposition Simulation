@@ -1,0 +1,44 @@
+
+import numpy as np
+import matplotlib.pyplot as plt
+from ace_tools import display_dataframe_to_user
+
+# Define simulation parameters
+L = 10.0  # Spatial domain length
+N = 201   # Number of spatial grid points
+dx = L / (N - 1)
+x = np.linspace(0, L, N)
+
+T = 50e-6  # Total simulation time (50 microseconds)
+dt = 0.5e-6  # Time step (0.5 microseconds)
+steps = int(T / dt)
+
+# Constants
+c = 1.0  # wave speed (can be tuned)
+damping = 0.01  # small damping for stability
+
+# Initial wavefunction and velocity
+def gaussian_packet(center, width, velocity):
+    return np.exp(-((x - center) ** 2) / (2 * width ** 2)) * np.cos(velocity * (x - center))
+
+beta_prev = gaussian_packet(3.0, 0.3, 5.0) + gaussian_packet(7.0, 0.3, -5.0)
+beta = beta_prev.copy()
+beta_next = np.zeros(N)
+
+# Data to store time evolution
+evolution = []
+
+# Simulate
+for step in range(steps):
+    for i in range(1, N - 1):
+        beta_next[i] = (2 * beta[i] - beta_prev[i] +
+                        (c**2 * dt**2 / dx**2) * (beta[i+1] - 2*beta[i] + beta[i-1]) -
+                        damping * (beta[i] - beta_prev[i]))
+    beta_prev, beta = beta, beta_next.copy()
+    if step % 5 == 0:  # Sample every 5 steps to save memory
+        evolution.append(beta.copy())
+
+# Convert to DataFrame for display
+evolution_array = np.array(evolution)
+display_dataframe_to_user("Two-Packet Collision Simulation (Stabilized)", 
+                          pd.DataFrame(evolution_array, columns=[f"x={round(val, 2)}" for val in x]))
