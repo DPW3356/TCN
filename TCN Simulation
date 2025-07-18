@@ -1,0 +1,130 @@
+import numpy as np
+import pandas as pd
+from ace_tools import display_dataframe_to_user
+
+# =================================================
+# 1. SIMULATION PARAMETERS
+# =================================================
+
+# Spatial Grid
+L = 10.0  # Spatial domain length
+N = 201   # Number of spatial grid points
+dx = L / (N - 1)
+x = np.linspace(0, L, N)
+
+# Temporal Grid
+T = 150e-6 # Total simulation time (150 microseconds)
+dt = 1e-6    # Time step (1 microsecond)
+steps = int(T / dt)
+
+# =================================================
+# 2. TCN PHYSICS PARAMETERS ("Final Evolved Equation")
+# =================================================
+
+m = 1.0      # Mass (can be set to 1 for simplicity)
+hbar = 1.0   # Planck's constant (can be set to 1 for simplicity)
+
+# TCN-specific terms
+gamma = 0.03   # Strength of the memory feedback
+lam = 0.01     # Strength of the non-linear self-coherence (lambda)
+mu = 0.05      # Damping / energy loss term
+
+# Memory kernel setup
+memory_depth = 10  # How many past steps the field remembers
+# Weights that decay exponentially, so recent memory is stronger
+memory_weights = np.exp(-np.arange(1, memory_depth + 1) * gamma)
+
+# =================================================
+# 3. INITIAL CONDITIONS
+# =================================================
+
+# Helper function to create a Gaussian wave packet
+def gaussian_packet(center, width, velocity):
+    """Creates a localized wave packet with initial momentum."""
+    # The cosine term gives the packet a "push"
+    return np.exp(-((x - center) ** 2) / (2 * width ** 2)) * np.cos(velocity * (x - center))
+
+# Initialize separate fields and memory buffers for Alice (A) and Bob (B)
+beta_A = np.zeros((steps, N), dtype=complex)
+beta_B = np.zeros((steps, N), dtype=complex)
+
+# Set the initial state (t=0) for each packet
+beta_A[0] = gaussian_packet(2.5, 0.3, 5.0)  # Starts left, moves right
+beta_B[0] = gaussian_packet(7.5, 0.3, -5.0) # Starts right, moves left
+
+# =================================================
+# 4. SIMULATION CORE
+# =================================================
+
+print("Running True TCN Collision Simulation...")
+
+# Main loop to evolve the system over time
+for t in range(1, steps):
+
+    # --- Evolve Packet A ---
+    # Standard quantum dispersion term
+    laplacian_A = (np.roll(beta_A[t-1], -1) - 2 * beta_A[t-1] + np.roll(beta_A[t-1], 1)) / dx**2
+
+    # TCN Memory Term for A (listens to its own past)
+    memory_sum_A = sum(
+        memory_weights[m-1] * beta_A[t-m] if t-m >= 0 else 0
+        for m in range(1, memory_depth + 1)
+    )
+
+    # TCN Self-Coherence Term for A (reinforces itself)
+    # Inner product measures the field's own intensity
+    feedback_A = lam * np.sum(np.conj(beta_A[t-1]) * beta_A[t-1]) * beta_A[t-1]
+
+    # Damping Term for A
+    damping_A = -1j * hbar * mu * beta_A[t-1]
+
+    # Calculate the next state of A
+    beta_A[t] = beta_A[t-1] + dt * (
+        (-1j * hbar * (-hbar**2 / (2*m)) * laplacian_A) +
+        memory_sum_A +
+        feedback_A +
+        damping_A
+    )
+
+    # --- Evolve Packet B (Identical physics) ---
+    laplacian_B = (np.roll(beta_B[t-1], -1) - 2 * beta_B[t-1] + np.roll(beta_B[t-1], 1)) / dx**2
+    memory_sum_B = sum(
+        memory_weights[m-1] * beta_B[t-m] if t-m >= 0 else 0
+        for m in range(1, memory_depth + 1)
+    )
+    feedback_B = lam * np.sum(np.conj(beta_B[t-1]) * beta_B[t-1]) * beta_B[t-1]
+    damping_B = -1j * hbar * mu * beta_B[t-1]
+    beta_B[t] = beta_B[t-1] + dt * (
+        (-1j * hbar * (-hbar**2 / (2*m)) * laplacian_B) +
+        memory_sum_B +
+        feedback_B +
+        damping_B
+    )
+
+    # --- Interaction (Superposition) ---
+    # The "real" field that each packet's memory will record is the sum of both.
+    # This is a simplification for visualization; a true interaction would be
+    # more complex, but this captures the essence.
+    total_field = beta_A + beta_B
+
+print("Simulation Complete.")
+
+# =================================================
+# 5. DATA LOGGING AND DISPLAY
+# =================================================
+
+# Calculate the probability density (|β|^2) of the *combined* field
+total_magnitude_squared = np.abs(total_field)**2
+
+# Create a DataFrame for easy viewing
+df_results = pd.DataFrame(
+    total_magnitude_squared,
+    columns=[f"x={val:.2f}" for val in x]
+)
+df_results["time (μs)"] = np.arange(0, T, dt)
+
+# Display snapshots of the results
+snapshots_indices = [0, 45, 75, 149]
+df_snapshots = df_results.iloc[snapshots_indices]
+
+display_dataframe_to_user("True TCN Collision Snapshots (|β|^2)", df_snapshots)
